@@ -27,11 +27,11 @@
 #uncomment if needed to install
   #install.packages("iNEXT")
   library(iNEXT)        # coverage-based diversity estimation
-install.packages("vegan")
+#install.packages("vegan")
   library(vegan)        # biodiversity tools (optional later)
-install.packages("Biostrings")
+#install.packages("Biostrings")
   library(Biostrings)   # sequence-aware objects (COI section, optional)
-install.packages("maps")
+#install.packages("maps")
   library(maps)         # simple world polygons for basemaps
 
 
@@ -87,25 +87,27 @@ bold_sub <- bold_sub %>%
   rename(country_ocean = `country/ocean`)
 
 ### PART 4 — DEFINE REGIONS (North America vs. Eurasia) --------
+# Filter out the NAs in longitude and latitude
 # Create a new column using mutate to divide the data into North America and Eurasia using latitude/longitude rules so we can compare them. Manually assigned Aleutian Islands (Alaska) into NA since they technically cross the line into EA but are supposed to be part of NA.
+# Filter out the NAs in region and bins
+
 # Rule 1: Northern Hemisphere AND longitude between -170 and -30 → North America
 # Rule 2: Northern Hemisphere AND longitude > -30 up to 180 → Eurasia
 # Else: leave as NA (no region)
 
-bold_reg <- bold_sub %>%
+df_use <- bold_sub %>%
+  filter(!is.na(lat), !is.na(lon)) %>% 
   mutate(
     region2 = case_when(
-      !is.na(lat) & !is.na(lon) & lat >= 0 & lon >= -170 & lon <= -30 ~ "North America",
-      !is.na(lat) & !is.na(lon) & lat >= 0 & lon >  -30  & lon <= 180 ~ "Eurasia",
+      lat >= 0 & lon >= -170 & lon <= -30 ~ "North America",
+      lat >= 0 & lon >  -30  & lon <= 180 ~ "Eurasia",
       TRUE ~ NA_character_
     ),
     # # Manual fix of Aleutian chain (>=45°N & >170°E) make it North America.
-    region2 = ifelse(!is.na(lat) & !is.na(lon) & lat >= 45 & lon > 170, "North America", region2)
-  )
-
-# Final analysis table to keep only the rows with a region and a BIN and remove any incomplete records
-df_use <- bold_reg %>%
+    region2 = ifelse(lat >= 45 & lon > 170, "North America", region2)
+  ) %>% 
   filter(!is.na(region2), !is.na(bin_uri))
+
 
 # Quick counts by region 
 df_use %>%
@@ -274,7 +276,7 @@ p_fig4 <- ggplot(df_combo, aes(method, value, fill = region2)) +
   theme(panel.grid.minor = element_blank(),
         legend.position  = "bottom",
         axis.text.x      = element_text(size = 9))
-
+p_fig4
 ###############################################################
 # FIGURE 3 — Rank–Abundance Curves of BINs by Region
 # Purpose: compare the internal structure of diversity (dominance/evenness)
@@ -302,7 +304,7 @@ p_fig3 <- ggplot(rank_abund, aes(rank, n, color = region2)) +
   theme_light() +
   theme(panel.grid.minor = element_blank(),
         legend.position  = "bottom")
-
+p_fig3
 
 # Save all figures to figs folder.  ========================
 ggsave("../figs/Figure1_Map.png", p_map, width = 10, height = 6, dpi = 300)
