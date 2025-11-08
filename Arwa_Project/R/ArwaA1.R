@@ -1,7 +1,7 @@
 ###############################################################
 # Assignment 1 — Biodiversity Exploration (Cervidae, BOLD)
 # Author: Arwa Sheheryar | Date: Oct 2025
-# Goal: Explore BIN & species diversity; compare regions (NA vs EA)
+# Goal: Explore BIN diversity; compare regions (NA vs EA)
 ###############################################################
 
 # ================================================================
@@ -79,12 +79,7 @@ df_coords <- df_full %>%
 
 # Keep a lean analysis of only the columns we need for our research question
 bold_sub <- df_coords %>%
-  select(processid, bin_uri, family, genus, species,
-         region, `country/ocean`, lat, lon, marker_code, nuc)
-
-# Rename to avoid having to use backticks
-bold_sub <- bold_sub %>%
-  rename(country_ocean = `country/ocean`)
+  select(processid, bin_uri, lat, lon)
 
 ### PART 4 — DEFINE REGIONS (North America vs. Eurasia) --------
 # Filter out the NAs in longitude and latitude
