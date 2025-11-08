@@ -109,9 +109,17 @@ df_use <- bold_sub %>%
   filter(!is.na(region2), !is.na(bin_uri))
 
 
-# Quick counts by region 
-df_use %>%
-  count(region2, name = "n_records")
+# Reproducibility checkpoint (confirms the data has been manipulated correctly and the NAs were removed) 
+checkpoint_summary = df_use %>% 
+  group_by(region2) %>% 
+  summarise(
+    total_records = n(),
+    missing_lat = sum(is.na(lat)),
+    missing_lon = sum(is.na(lon)),
+    missing_bin = sum(is.na(bin_uri))
+  )
+
+checkpoint_summary
 
 ###############################################################
 # FIGURE 1 — Geographic distribution of Cervidae BIN records
