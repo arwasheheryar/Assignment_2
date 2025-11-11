@@ -78,22 +78,33 @@ bold_sub <- df_coords %>%
 ### PART 4 — DEFINE REGIONS (North America vs. Eurasia) --------
 # Filter out the NAs in longitude and latitude
 # Create a new column using mutate to divide the data into North America and Eurasia using latitude/longitude rules so we can compare them. Manually assigned Aleutian Islands (Alaska) into NA since they technically cross the line into EA but are supposed to be part of NA.
-# Filter out the NAs in region and bins
 
 # Rule 1: Northern Hemisphere AND longitude between -170 and -30 → North America
 # Rule 2: Northern Hemisphere AND longitude > -30 up to 180 → Eurasia
 # Else: leave as NA (no region)
 
+# Assign variables to regions and lat/lon values for re-usability
+continent1 = "North America"
+continent2 = "Eurasia"
+lon_min1 <- -170
+lon_max1 <- -30
+lon_min2 <- -30
+lon_max2 <- 180
+lat_min <- 0
+aleut_lat <- 45
+aleut_lon <- 170
+
+
 df_use <- bold_sub %>%
-  filter(!is.na(lat), !is.na(lon)) %>% 
+  filter(!is.na(lat), !is.na(lon), ) %>% 
   mutate(
     region2 = case_when(
-      lat >= 0 & lon >= -170 & lon <= -30 ~ "North America",
-      lat >= 0 & lon >  -30  & lon <= 180 ~ "Eurasia",
+      lat >= lat_min & lon >= lon_min1 & lon <= lon_max1 ~ continent1,
+      lat >= lat_min & lon >  lon_min2  & lon <= lon_max2 ~ continent2,
       TRUE ~ NA_character_
     ),
     # Manual fix of Aleutian chain (>=45°N & >170°E) make it North America.
-    region2 = ifelse(lat >= 45 & lon > 170, "North America", region2)
+    region2 = ifelse(lat >= aleut_lat & lon > aleut_lon, continent1, region2)
   ) %>% 
   filter(!is.na(region2), !is.na(bin_uri))
 
@@ -120,20 +131,21 @@ checkpoint_summary
 # 1) Prep points for plotting
 
 df_pts <- df_use %>%
-  filter(!is.na(lat), !is.na(lon), !is.na(region2)) %>%
   mutate(
-    lon_plot = ifelse(lon > 180, lon - 360, lon),  # fix longitudes > 180
-    lat_plot = lat,
-    bin_label = coalesce(bin_uri, "BIN unknown")   # readable label for BIN
+    lon_plot = ifelse(lon > lon_max2, lon - 360, lon),  # fix longitudes > 180
+    lat_plot = lat
   )
+
 
 # 2) Group rare BINs to keep the legend readable (change N as needed)
 TOP_N_BINS <- 10
 df_pts <- df_pts %>%
-  mutate(bin_grp = forcats::fct_lump_n(bin_label, n = TOP_N_BINS, other_level = "Other BINs"))
+  mutate(bin_grp = forcats::fct_lump_n(bin_uri, n = TOP_N_BINS, other_level = "Other BINs"))
+
 
 # 3) Basemap
 world <- map_data("world")
+
 
 # 4) Plot
 p_map <- ggplot() +
@@ -145,16 +157,17 @@ p_map <- ggplot() +
   geom_point(
     data = df_pts,
     aes(lon_plot, lat_plot, color = bin_grp, shape = region2), #color points by bin, shape by region
-    alpha = 0.6, size = 1.8
+        alpha = 0.6, size = 1.8
   ) +
-  coord_quickmap(xlim = c(-170, 180), ylim = c(0, 85)) + #limits of longitude
-  scale_color_viridis_d(name = "BIN (top groups)") +
-  scale_shape_discrete(name = "Region") +
+  coord_quickmap(xlim = c(lon_min1, lon_max2), ylim = c(0, 85)) + #limits of longitude
+  scale_shape_manual(
+    name = "Region",
+    values = c("North America" = 15,
+               "Eurasia" = 17)) +
   labs(
     title    = "Geographic Distribution of Cervidae BIN Records",
-    subtitle = paste0("Colors = BIN (top ", TOP_N_BINS, " + 'Other'); Shapes = Region"),
     x = "Longitude", y = "Latitude",
-    caption  = "Basemap from {maps}. Longitudes > 180 converted to -180–180."
+    caption  = "Basemap from {maps}. Longitudes > 180 converted to (-180) - (180)."
   ) +
   guides(
     color = guide_legend(override.aes = list(size = 3, alpha = 1), ncol = 2), #size of color legend and shape legend
@@ -163,19 +176,28 @@ p_map <- ggplot() +
   theme(panel.grid.minor = element_blank(), #remove minor gridlines clean look
         legend.position  = "bottom")
 
+
 # 5) Make the BIN legend informative (order by abundance + add counts)
     
- #count how many records each BIN group has and sort most to least frequent
-bin_counts <- df_pts %>% count(bin_grp, name = "n_total") %>% arrange(desc(n_total))
-#match the legend order/labelling to the data 
-df_pts <- df_pts %>% mutate(bin_grp = factor(bin_grp, levels = bin_counts$bin_grp))
+# Count how many records each BIN group has and sort most to least frequent
+bin_counts <- df_pts %>% 
+  count(bin_grp, name = "n_total") %>% 
+  arrange(desc(n_total))
+
+# Match the legend order/labeling to the data 
+df_pts <- df_pts %>% 
+  mutate(bin_grp = factor(bin_grp, levels = bin_counts$bin_grp))
 bin_breaks <- bin_counts$bin_grp
-bin_labels <- paste0(bin_counts$bin_grp, " (n=", bin_counts$n_total, ")")
+bin_labels <- paste0(bin_counts$bin_grp, " (n = ", bin_counts$n_total, ")")
 
 p_map <- p_map +
-  scale_color_viridis_d(name = "BIN (top groups)", breaks = bin_breaks, labels = bin_labels) +
-  guides(color = guide_legend(override.aes = list(size = 3, alpha = 1), ncol = 2,
-                              title.position = "top"),
+  scale_color_viridis_d(
+    name = "BIN (top 10 groups)", 
+    breaks = bin_breaks, 
+    labels = bin_labels
+    ) +
+  guides(color = guide_legend(override.aes = list(size = 3, alpha = 1),
+                              ncol = 2, title.position = "top"),
          shape = guide_legend(override.aes = list(size = 3, alpha = 1), title.position = "top"))
 
 p_map  # print
@@ -190,13 +212,13 @@ p_map  # print
 # 1) Effort-normalized (per 100 records)
 summary_bins <- df_use %>%
   filter(!is.na(region2)) %>%
-  dplyr::group_by(region2) %>%
-  dplyr::summarise(
-    unique_bins = dplyr::n_distinct(bin_uri),
-    n_records   = dplyr::n(),
+  group_by(region2) %>%
+  summarise(
+    unique_bins = n_distinct(bin_uri),
+    n_records   = n(),
     bins_per_100 = (unique_bins / n_records) * 100
   ) %>%
-  dplyr::ungroup()
+  ungroup()
 
 # 2) Coverage-standardized (q = 0) via iNEXT
 abund_by_region <- df_use %>%
@@ -207,10 +229,10 @@ abund_list <- abund_by_region %>%
   summarise(vec = list(setNames(n, bin_uri)), .groups = "drop") %>%
   { setNames(.$vec, .$region2) }
 
-info <- iNEXT::DataInfo(abund_list, datatype = "abundance")
+info <- DataInfo(abund_list, datatype = "abundance")
 target_cov <- round(min(info$SC), 2)
 
-est_cov <- iNEXT::estimateD(
+est_cov <- estimateD(
   abund_list, q = 0, datatype = "abundance",
   base = "coverage", level = target_cov, conf = 0.95
 )
@@ -274,6 +296,7 @@ p_fig2 <- ggplot(df_combo, aes(method, value, fill = region2)) +
         legend.position  = "bottom",
         axis.text.x      = element_text(size = 9))
 p_fig2
+
 ###############################################################
 # FIGURE 3 — Rank–Abundance Curves of BINs by Region
 # Purpose: compare the internal structure of diversity (dominance/evenness)
