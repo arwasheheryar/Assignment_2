@@ -21,18 +21,15 @@
 # ================================================================
 
 ### PART 1 — LIBRARIES & THEME --------------------------------
-  library(tidyverse)    # readr + dplyr + ggplot2 + stringr + forcats
-  library(conflicted)   # make function choices explicit
-  library(viridis)      # colourblind-friendly palettes for ggplot
-#uncomment if needed to install
-  #install.packages("iNEXT")
-  library(iNEXT)        # coverage-based diversity estimation
-#install.packages("vegan")
-  library(vegan)        # biodiversity tools (optional later)
-#install.packages("Biostrings")
-  library(Biostrings)   # sequence-aware objects (COI section, optional)
+# uncomment packages if needed to install
+#install.packages("iNEXT")
 #install.packages("maps")
-  library(maps)         # simple world polygons for basemaps
+
+library(tidyverse)    # readr + dplyr + ggplot2 + stringr + forcats
+library(conflicted)   # make function choices explicit
+library(viridis)      # colourblind-friendly palettes for ggplot
+library(iNEXT)        # coverage-based diversity estimation
+library(maps)         # simple world polygons for basemaps
 
 
 conflict_prefer("filter", "dplyr")
@@ -47,19 +44,13 @@ theme_set(theme_light())  # consistent, clean plotting theme
 
 df_full <- read_tsv("../data/Cervidae_BOLD.tsv")
 
-#If this was successful, you will see an object in your environment with 2401 observations of 85 variables.
 
-#Have a look at the data check the formatting 
+#Explore the data. The object in your environment should have 2401 observations of 85 variables.
 
 summary(df_full)
-class(df_full$coord)   #Here we can see the class of the column coord this will be important for geographical analysis, right now the class is "character"
-glimpse(df_full)      # check types and a few example rows
-names(df_full)        # exact column names you'll reference later
-
-# (Optional) sanity checks you can keep or remove:
-nrow(df_full)        # how many rows (Observations/records) were read?
-ncol(df_full)        # how many columns (variables)?
-head(df_full, 3)     # the first 3 rows to get an idea of the formatting
+glimpse(df_full)  # view the # of rows, columns, and column names
+head(df_full, 3)  # the first 3 rows to get an idea of the formatting
+class(df_full$coord) #Here we can see the class of the column coord this will be important for geographical analysis, right now the class is "character"
 
 
 ### PART 3 — BASIC CLEANUP (coords → lat/lon) ------------------
@@ -68,18 +59,21 @@ head(df_full, 3)     # the first 3 rows to get an idea of the formatting
 #   "lat"  = latitude (north–south position)
 #   "lon"  = longitude (east–west position)
 
-df_coords <- df_full %>% 
-  mutate( 
-    # Drop the leading "[" and trailing "]" safely; coerce to character first
-    coord_text = stringr::str_sub(as.character(coord), 2, nchar(as.character(coord)) - 1),
-    # Split at comma into 2 pieces, trim blank spaces, and convert the resulting character to numeric
-    lat = as.numeric(stringr::str_trim(stringr::str_split_fixed(coord_text, ",", 2)[, 1])),
-    lon = as.numeric(stringr::str_trim(stringr::str_split_fixed(coord_text, ",", 2)[, 2]))
+# Drop the leading "[" and trailing "]" safely; coerce to character first
+# Split at comma into 2 pieces, trim blank spaces, and convert the resulting character to numeric
+
+df_coords <- df_full %>%
+  mutate(coord = str_remove_all(coord, "\\[|\\]")) %>% 
+  separate(coord, into = c("lat", "lon"), sep = ",") %>% 
+  mutate(
+    lat = as.numeric(str_trim(lat)),
+    lon = as.numeric(str_trim(lon))
   )
 
 # Keep a lean analysis of only the columns we need for our research question
 bold_sub <- df_coords %>%
-  select(processid, bin_uri, lat, lon)
+  select(bin_uri, lat, lon)
+
 
 ### PART 4 — DEFINE REGIONS (North America vs. Eurasia) --------
 # Filter out the NAs in longitude and latitude
@@ -98,7 +92,7 @@ df_use <- bold_sub %>%
       lat >= 0 & lon >  -30  & lon <= 180 ~ "Eurasia",
       TRUE ~ NA_character_
     ),
-    # # Manual fix of Aleutian chain (>=45°N & >170°E) make it North America.
+    # Manual fix of Aleutian chain (>=45°N & >170°E) make it North America.
     region2 = ifelse(lat >= 45 & lon > 170, "North America", region2)
   ) %>% 
   filter(!is.na(region2), !is.na(bin_uri))
@@ -258,7 +252,7 @@ df_combo <- df_combo %>%
 # 5) Plot
 pd <- position_dodge(width = 0.7)
 
-p_fig4 <- ggplot(df_combo, aes(method, value, fill = region2)) +
+p_fig2 <- ggplot(df_combo, aes(method, value, fill = region2)) +
   geom_col(width = 0.65, position = pd) +
   geom_errorbar(aes(ymin = lcl, ymax = ucl),
                 width = 0.14, linewidth = 0.6,
@@ -279,7 +273,7 @@ p_fig4 <- ggplot(df_combo, aes(method, value, fill = region2)) +
   theme(panel.grid.minor = element_blank(),
         legend.position  = "bottom",
         axis.text.x      = element_text(size = 9))
-p_fig4
+p_fig2
 ###############################################################
 # FIGURE 3 — Rank–Abundance Curves of BINs by Region
 # Purpose: compare the internal structure of diversity (dominance/evenness)
@@ -311,6 +305,6 @@ p_fig3
 
 # Save all figures to figs folder.  ========================
 ggsave("../figs/Figure1_Map.png", p_map, width = 10, height = 6, dpi = 300)
-ggsave("../figs/Figure2_RichnessComparison.png", p_fig4, width = 9, height = 6, dpi = 300)
+ggsave("../figs/Figure2_RichnessComparison.png", p_fig2, width = 9, height = 6, dpi = 300)
 ggsave("../figs/Figure3_RankAbundance.png", p_fig3, width = 9, height = 6, dpi = 300)
 
