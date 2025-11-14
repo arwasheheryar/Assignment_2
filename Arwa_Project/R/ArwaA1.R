@@ -1,7 +1,7 @@
 ###############################################################
 # Assignment 1 — Biodiversity Exploration (Cervidae, BOLD)
 # Author: Arwa Sheheryar | Date: Oct 2025
-# Goal: Explore BIN & species diversity; compare regions (NA vs EA)
+# Goal: Explore BIN diversity; compare regions (NA vs EA)
 ###############################################################
 
 # ================================================================
@@ -21,45 +21,31 @@
 # ================================================================
 
 ### PART 1 — LIBRARIES & THEME --------------------------------
-  library(tidyverse)    # readr + dplyr + ggplot2 + stringr + forcats
-  library(conflicted)   # make function choices explicit
-  library(viridis)      # colourblind-friendly palettes for ggplot
-#uncomment if needed to install
-  #install.packages("iNEXT")
-  library(iNEXT)        # coverage-based diversity estimation
-install.packages("vegan")
-  library(vegan)        # biodiversity tools (optional later)
-install.packages("Biostrings")
-  library(Biostrings)   # sequence-aware objects (COI section, optional)
-install.packages("maps")
-  library(maps)         # simple world polygons for basemaps
+# uncomment packages if needed to install
+# install.packages("iNEXT")
+# install.packages("maps")
+
+library(tidyverse) # readr + dplyr + ggplot2 + stringr + forcats
+library(conflicted) # make function choices explicit
+library(viridis) # colourblind-friendly palettes for ggplot
+library(iNEXT) # coverage-based diversity estimation
+library(maps) # simple world polygons for basemaps
 
 
-conflict_prefer("filter", "dplyr")
-conflict_prefer("lag",    "dplyr")
-conflict_prefer("rename", "dplyr")
-
-
-theme_set(theme_light())  # consistent, clean plotting theme
+theme_set(theme_light()) # consistent, clean plotting theme
 
 ### PART 2 — IMPORT (KEEP A SAFE COPY OF ORIGINAL DATA) --------
 # Read the data as df_full and keep it untouched original data;for all further processing use copies
 
 df_full <- read_tsv("../data/Cervidae_BOLD.tsv")
 
-#If this was successful, you will see an object in your environment with 2401 observations of 85 variables.
 
-#Have a look at the data check the formatting 
+# Explore the data. The object in your environment should have 2401 observations of 85 variables.
 
 summary(df_full)
-class(df_full$coord)   #Here we can see the class of the column coord this will be important for geographical analysis, right now the class is "character"
-glimpse(df_full)      # check types and a few example rows
-names(df_full)        # exact column names you'll reference later
-
-# (Optional) sanity checks you can keep or remove:
-nrow(df_full)        # how many rows (Observations/records) were read?
-ncol(df_full)        # how many columns (variables)?
-head(df_full, 3)     # the first 3 rows to get an idea of the formatting
+glimpse(df_full) # view the # of rows, columns, and column names
+head(df_full, 3) # the first 3 rows to get an idea of the formatting
+class(df_full$coord) # Here we can see the class of the column coord this will be important for geographical analysis, right now the class is "character"
 
 
 ### PART 3 — BASIC CLEANUP (coords → lat/lon) ------------------
@@ -68,48 +54,66 @@ head(df_full, 3)     # the first 3 rows to get an idea of the formatting
 #   "lat"  = latitude (north–south position)
 #   "lon"  = longitude (east–west position)
 
-df_coords <- df_full %>% 
-  mutate( 
-    # Drop the leading "[" and trailing "]" safely; coerce to character first
-    coord_text = stringr::str_sub(as.character(coord), 2, nchar(as.character(coord)) - 1),
-    # Split at comma into 2 pieces, trim blank spaces, and convert the resulting character to numeric
-    lat = as.numeric(stringr::str_trim(stringr::str_split_fixed(coord_text, ",", 2)[, 1])),
-    lon = as.numeric(stringr::str_trim(stringr::str_split_fixed(coord_text, ",", 2)[, 2]))
+# Drop the leading "[" and trailing "]" safely
+# Split at comma into 2 columns, and convert the resulting character to numeric
+
+df_coords <- df_full %>%
+  mutate(coord = str_remove_all(coord, "\\[|\\]")) %>%
+  filter(str_detect(coord, ",")) %>%
+  separate(coord, into = c("lat", "lon"), sep = ",") %>%
+  mutate(
+    lat = as.numeric(str_trim(lat)),
+    lon = as.numeric(str_trim(lon))
   )
 
 # Keep a lean analysis of only the columns we need for our research question
 bold_sub <- df_coords %>%
-  select(processid, bin_uri, family, genus, species,
-         region, `country/ocean`, lat, lon, marker_code, nuc)
+  select(bin_uri, lat, lon)
 
-# Rename to avoid having to use backticks
-bold_sub <- bold_sub %>%
-  rename(country_ocean = `country/ocean`)
 
 ### PART 4 — DEFINE REGIONS (North America vs. Eurasia) --------
+# Filter out the NAs in longitude and latitude
 # Create a new column using mutate to divide the data into North America and Eurasia using latitude/longitude rules so we can compare them. Manually assigned Aleutian Islands (Alaska) into NA since they technically cross the line into EA but are supposed to be part of NA.
+
 # Rule 1: Northern Hemisphere AND longitude between -170 and -30 → North America
 # Rule 2: Northern Hemisphere AND longitude > -30 up to 180 → Eurasia
 # Else: leave as NA (no region)
 
-bold_reg <- bold_sub %>%
+# Assign variables to regions, latitude, and longitude values for re-usability
+region_labels <- c("North America", "Eurasia")
+NA_bounds <- c(min = -170, max = -30)
+EA_bounds <- c(min = -30, max = 180)
+lat_min <- 0
+aleut_lat <- 45
+aleut_lon <- 170
+TOP_N_BINS <- 10
+
+
+df_use <- bold_sub %>%
+  filter(!is.na(lat), !is.na(lon), ) %>%
   mutate(
     region2 = case_when(
-      !is.na(lat) & !is.na(lon) & lat >= 0 & lon >= -170 & lon <= -30 ~ "North America",
-      !is.na(lat) & !is.na(lon) & lat >= 0 & lon >  -30  & lon <= 180 ~ "Eurasia",
+      lat >= lat_min & between(lon, NA_bounds["min"], NA_bounds["max"]) ~ region_labels[1],
+      lat >= lat_min & between(lon, EA_bounds["min"], EA_bounds["max"]) ~ region_labels[2],
       TRUE ~ NA_character_
     ),
-    # # Manual fix of Aleutian chain (>=45°N & >170°E) make it North America.
-    region2 = ifelse(!is.na(lat) & !is.na(lon) & lat >= 45 & lon > 170, "North America", region2)
-  )
-
-# Final analysis table to keep only the rows with a region and a BIN and remove any incomplete records
-df_use <- bold_reg %>%
+    # Manual fix of Aleutian chain (>=45°N & >170°E) make it North America.
+    region2 = ifelse(lat >= aleut_lat & lon > aleut_lon, region_labels[1], region2)
+  ) %>%
   filter(!is.na(region2), !is.na(bin_uri))
 
-# Quick counts by region 
-df_use %>%
-  count(region2, name = "n_records")
+
+# Reproducibility checkpoint (confirms the data has been manipulated correctly and the NAs were removed)
+checkpoint_summary <- df_use %>%
+  group_by(region2) %>%
+  summarise(
+    total_records = n(),
+    missing_lat = sum(is.na(lat)),
+    missing_lon = sum(is.na(lon)),
+    missing_bin = sum(is.na(bin_uri))
+  )
+
+checkpoint_summary
 
 ###############################################################
 # FIGURE 1 — Geographic distribution of Cervidae BIN records
@@ -121,65 +125,83 @@ df_use %>%
 # 1) Prep points for plotting
 
 df_pts <- df_use %>%
-  filter(!is.na(lat), !is.na(lon), !is.na(region2)) %>%
   mutate(
-    lon_plot = ifelse(lon > 180, lon - 360, lon),  # fix longitudes > 180
-    lat_plot = lat,
-    bin_label = coalesce(bin_uri, "BIN unknown")   # readable label for BIN
+    lon_plot = ifelse(lon > 180, lon - 360, lon), # fix longitudes > 180
+    lat_plot = lat
   )
 
+
 # 2) Group rare BINs to keep the legend readable (change N as needed)
-TOP_N_BINS <- 10
 df_pts <- df_pts %>%
-  mutate(bin_grp = forcats::fct_lump_n(bin_label, n = TOP_N_BINS, other_level = "Other BINs"))
+  mutate(bin_grp = forcats::fct_lump_n(bin_uri, n = TOP_N_BINS, other_level = "Other BINs"))
+
 
 # 3) Basemap
 world <- map_data("world")
 
-# 4) Plot
+
+# 4) Make the BIN legend informative (order by abundance + add counts)
+
+# Count how many records each BIN group has and sort most to least frequent
+bin_counts <- df_pts %>%
+  count(bin_grp, name = "n_total") %>%
+  arrange(desc(n_total))
+
+# Match the legend order/labeling to the data
+df_pts <- df_pts %>%
+  mutate(bin_grp = factor(bin_grp, levels = bin_counts$bin_grp))
+bin_breaks <- bin_counts$bin_grp
+bin_labels <- paste0(bin_counts$bin_grp, " (n = ", bin_counts$n_total, ")")
+
+
+# 5) Plot
 p_map <- ggplot() +
   geom_polygon(
     data = world, # built-in map data (country outlines)
-    aes(long, lat, group = group), #define map structure lon/lat grouped by country
-    fill = "grey98", color = "grey80", linewidth = 0.2 #aesthetics of map fill and border
+    aes(long, lat, group = group), # define map structure lon/lat grouped by country
+    fill = "grey98", color = "grey80", linewidth = 0.2 # aesthetics of map fill and border
   ) +
   geom_point(
     data = df_pts,
-    aes(lon_plot, lat_plot, color = bin_grp, shape = region2), #color points by bin, shape by region
+    aes(lon_plot, lat_plot, color = bin_grp, shape = region2), # color points by bin, shape by region
     alpha = 0.6, size = 1.8
   ) +
-  coord_quickmap(xlim = c(-170, 180), ylim = c(0, 85)) + #limits of longitude
-  scale_color_viridis_d(name = "BIN (top groups)") +
-  scale_shape_discrete(name = "Region") +
+  coord_quickmap(xlim = c(NA_bounds["min"], EA_bounds["max"]), ylim = c(0, 85)) + # limits of longitude
+  scale_shape_manual(
+    name = "Region",
+    values = c(
+      "North America" = 15,
+      "Eurasia" = 17
+    )
+  ) +
   labs(
-    title    = "Geographic Distribution of Cervidae BIN Records",
-    subtitle = paste0("Colors = BIN (top ", TOP_N_BINS, " + 'Other'); Shapes = Region"),
-    x = "Longitude", y = "Latitude",
-    caption  = "Basemap from {maps}. Longitudes > 180 converted to -180–180."
+    title = "Geographic Distribution of Cervidae BIN Records",
+    x = "Longitude", y = "Latitude"
+  ) +
+  scale_color_viridis_d(
+    name = "BIN (top 10 groups)",
+    breaks = bin_breaks,
+    labels = bin_labels
   ) +
   guides(
-    color = guide_legend(override.aes = list(size = 3, alpha = 1), ncol = 2), #size of color legend and shape legend
-    shape = guide_legend(override.aes = list(size = 3, alpha = 1))
+    color = guide_legend(
+      override.aes = list(size = 3, alpha = 1),
+      ncol = 2,
+      title.position = "top"
+    ),
+    shape = guide_legend(
+      override.aes = list(size = 3, alpha = 1),
+      title.position = "top"
+    )
   ) +
-  theme(panel.grid.minor = element_blank(), #remove minor gridlines clean look
-        legend.position  = "bottom")
+  theme(
+    panel.grid.minor = element_blank(), # remove minor gridlines clean look
+    legend.position = "bottom"
+  )
 
-# 5) Make the BIN legend informative (order by abundance + add counts)
-    
- #count how many records each BIN group has and sort most to least frequent
-bin_counts <- df_pts %>% count(bin_grp, name = "n_total") %>% arrange(desc(n_total))
-#match the legend order/labelling to the data 
-df_pts <- df_pts %>% mutate(bin_grp = factor(bin_grp, levels = bin_counts$bin_grp))
-bin_breaks <- bin_counts$bin_grp
-bin_labels <- paste0(bin_counts$bin_grp, " (n=", bin_counts$n_total, ")")
 
-p_map <- p_map +
-  scale_color_viridis_d(name = "BIN (top groups)", breaks = bin_breaks, labels = bin_labels) +
-  guides(color = guide_legend(override.aes = list(size = 3, alpha = 1), ncol = 2,
-                              title.position = "top"),
-         shape = guide_legend(override.aes = list(size = 3, alpha = 1), title.position = "top"))
+p_map # print
 
-p_map  # print
 
 ###############################################################
 # FIGURE 2 — One combined figure:
@@ -190,14 +212,13 @@ p_map  # print
 
 # 1) Effort-normalized (per 100 records)
 summary_bins <- df_use %>%
-  filter(!is.na(region2)) %>%
-  dplyr::group_by(region2) %>%
-  dplyr::summarise(
-    unique_bins = dplyr::n_distinct(bin_uri),
-    n_records   = dplyr::n(),
+  group_by(region2) %>%
+  summarise(
+    unique_bins = n_distinct(bin_uri),
+    n_records = n(),
     bins_per_100 = (unique_bins / n_records) * 100
   ) %>%
-  dplyr::ungroup()
+  ungroup()
 
 # 2) Coverage-standardized (q = 0) via iNEXT
 abund_by_region <- df_use %>%
@@ -206,13 +227,16 @@ abund_by_region <- df_use %>%
 abund_list <- abund_by_region %>%
   group_by(region2) %>%
   summarise(vec = list(setNames(n, bin_uri)), .groups = "drop") %>%
-  { setNames(.$vec, .$region2) }
+  {
+    setNames(.$vec, .$region2)
+  }
 
-info <- iNEXT::DataInfo(abund_list, datatype = "abundance")
+info <- DataInfo(abund_list, datatype = "abundance")
 target_cov <- round(min(info$SC), 2)
 
-est_cov <- iNEXT::estimateD(
-  abund_list, q = 0, datatype = "abundance",
+est_cov <- estimateD(
+  abund_list,
+  q = 0, datatype = "abundance",
   base = "coverage", level = target_cov, conf = 0.95
 )
 
@@ -231,7 +255,7 @@ df_combo <- bind_rows(
       region2,
       method = "Effort-normalized (per 100 records)",
       value  = bins_per_100,
-      lcl    = NA_real_,    # deterministic ratio → no CI
+      lcl    = NA_real_, # deterministic ratio → no CI
       ucl    = NA_real_
     ),
   fig2_data %>%
@@ -247,33 +271,42 @@ df_combo <- bind_rows(
 # 4) Place labels just above bar tops (or CI tops when present)
 pad <- diff(range(df_combo$value, na.rm = TRUE)) * 0.06
 df_combo <- df_combo %>%
-  mutate(label = round(value, 1),
-         label_y = ifelse(is.na(ucl), value + pad, ucl + pad))
+  mutate(
+    label = round(value, 1),
+    label_y = ifelse(is.na(ucl), value + pad, ucl + pad)
+  )
 
 # 5) Plot
 pd <- position_dodge(width = 0.7)
 
-p_fig4 <- ggplot(df_combo, aes(method, value, fill = region2)) +
+p_fig2 <- ggplot(df_combo, aes(method, value, fill = region2)) +
   geom_col(width = 0.65, position = pd) +
   geom_errorbar(aes(ymin = lcl, ymax = ucl),
-                width = 0.14, linewidth = 0.6,
-                position = pd, na.rm = TRUE) +
+    width = 0.14, linewidth = 0.6,
+    position = pd, na.rm = TRUE
+  ) +
   geom_text(aes(y = label_y, label = label),
-            position = pd, size = 3.6, fontface = "bold") +
-  scale_y_continuous(limits = c(0, max(df_combo$label_y, na.rm = TRUE) + pad),
-                     expand = expansion(mult = c(0, 0))) +
+    position = pd, size = 3.6, fontface = "bold"
+  ) +
+  scale_y_continuous(
+    limits = c(0, max(df_combo$label_y, na.rm = TRUE) + pad),
+    expand = expansion(mult = c(0, 0))
+  ) +
   scale_fill_viridis_d(name = "Region") +
   labs(
-    title    = "Cervidae BIN Richness: Effort-Normalized vs Coverage-Standardized",
+    title = "Cervidae BIN Richness: Effort-Normalized vs Coverage-Standardized",
     subtitle = "Two complementary standardizations shown side-by-side for each region",
     x = NULL,
     y = "BIN richness (per method)",
-    caption  = "Coverage-standardized values from iNEXT (q=0) at equal sample coverage; 95% CIs shown where applicable.\nEffort-normalized values are deterministic ratios (no CIs)."
+    caption = "Coverage-standardized values from iNEXT (q=0) at equal sample coverage; 95% CIs shown where applicable.\nEffort-normalized values are deterministic ratios (no CIs)."
   ) +
   theme_light() +
-  theme(panel.grid.minor = element_blank(),
-        legend.position  = "bottom",
-        axis.text.x      = element_text(size = 9))
+  theme(
+    panel.grid.minor = element_blank(),
+    legend.position = "bottom",
+    axis.text.x = element_text(size = 9)
+  )
+p_fig2
 
 ###############################################################
 # FIGURE 3 — Rank–Abundance Curves of BINs by Region
@@ -293,19 +326,98 @@ p_fig3 <- ggplot(rank_abund, aes(rank, n, color = region2)) +
   scale_y_log10() +
   scale_color_viridis_d(name = "Region") +
   labs(
-    title    = "Rank–Abundance Curves of Cervidae BINs by Region",
+    title = "Rank–Abundance Curves of Cervidae BINs by Region",
     subtitle = "Depicts dominance and evenness of BIN distribution within each region",
     x = "BIN rank (1 = most abundant)",
     y = "Number of records (log scale)",
     caption = "Curves based on BIN record frequencies from BOLD; log scale emphasizes rarity patterns."
   ) +
   theme_light() +
-  theme(panel.grid.minor = element_blank(),
-        legend.position  = "bottom")
+  theme(
+    panel.grid.minor = element_blank(),
+    legend.position = "bottom"
+  )
+p_fig3
+
+
+###############################################################
+# FIGURE 4 — BIN Composition Overlap Between Regions
+# Purpose: quantify how distinct the North American vs Eurasian
+# BIN pools are, using Jaccard similarity.
+###############################################################
+
+# 1) Get the unique BIN for each region
+bin_NA <- df_use %>%
+  filter(region2 == region_labels[1]) %>%
+  distinct(bin_uri) %>%
+  pull(bin_uri) # <-- converts to vector
+
+bin_EA <- df_use %>%
+  filter(region2 == region_labels[2]) %>%
+  distinct(bin_uri) %>%
+  pull(bin_uri)
+
+# 2) Calculate total (intersection) shared and union (unique) bins
+shared_bin <- length(base::intersect(bin_NA, bin_EA))
+total_unique <- length(base::union(bin_NA, bin_EA))
+
+# 3) Calculate the Jaccard similarity/disimilarity
+jaccard_sim <- shared_bin / total_unique
+jaccard_disim <- 1 - jaccard_sim
+
+# 4) Print numbers for verification
+shared_bin
+total_unique
+jaccard_sim
+jaccard_disim
+
+# View the dataframe and verify the total entries = shared + unique
+df_check <- df_use %>%
+  distinct(bin_uri, region2)
+
+nrow(df_check) == (shared_bin + total_unique)
+
+# 5) Prepare dataframe for plotting
+df_overlap <- tibble::tibble(
+  category = c("Shared BINs", "Unique to North America", "Unique to Eurasia"),
+  count = c(
+    shared_bin,
+    sum(!bin_NA %in% bin_EA),
+    sum(!bin_EA %in% bin_NA)
+  )
+) %>%
+  dplyr::mutate(proportion = count / sum(count))
+
+df_overlap <- df_overlap %>%
+  mutate(
+    percent = round(proportion * 100, 1),
+    legend_label = paste0(category, " (n=", count, ", ", percent, "%)")
+  )
+
+# 6) Plot pie chart
+p_fig4 <- ggplot(df_overlap, aes(x = "", y = proportion, fill = legend_label)) +
+  geom_col(width = 1, color = "white") +
+  coord_polar(theta = "y") +
+  scale_fill_viridis_d(name = NULL) +
+  labs(
+    title = "BIN Overlap Between North America and Eurasia",
+    subtitle = sprintf(
+      "Jaccard similarity = %.2f | dissimilarity = %.2f",
+      jaccard_sim, jaccard_disim
+    )
+  ) +
+  theme_void() +
+  theme(
+    legend.position = "bottom",
+    plot.title = element_text(face = "bold"),
+    plot.subtitle = element_text(size = 10)
+  )
+
+p_fig4
 
 
 # Save all figures to figs folder.  ========================
 ggsave("../figs/Figure1_Map.png", p_map, width = 10, height = 6, dpi = 300)
-ggsave("../figs/Figure2_RichnessComparison.png", p_fig4, width = 9, height = 6, dpi = 300)
+ggsave("../figs/Figure2_RichnessComparison.png", p_fig2, width = 9, height = 6, dpi = 300)
 ggsave("../figs/Figure3_RankAbundance.png", p_fig3, width = 9, height = 6, dpi = 300)
-
+ggsave("../figs/Figure4_BINOverlap.png", p_fig4, width = 9, height = 6, dpi = 300)
